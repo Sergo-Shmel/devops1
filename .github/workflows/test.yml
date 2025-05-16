@@ -9,39 +9,46 @@ jobs:
   test:
     runs-on: ubuntu-latest
     permissions:
-      issues: write  
-      pull-requests: read
+      issues: write
+      pull-requests: write
 
     steps:
-      - name: test_1
+      - name: Run tests
         run: |
-          echo "тест"
+          echo "Running test 1"
           ls -l
-          echo "тест пройден"
-
-      - name: test_2
-        run: |
-          echo "тест"
+          echo "Running test 2"
           sleep 1
-          echo "тест пройден"
+          echo "All tests passed"
 
-      - name: test_3
-        run: |
-          echo "тест"
-          echo "тест пройден"
-
-      - name: Add label
+      - name: Add 'test-passed' label
+        if: ${{ github.event.workflow_run.conclusion == 'success' }}
         uses: actions/github-script@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT_FOR_WORKFLOWS }}
         with:
           script: |
-            const pr = context.payload.workflow_run.pull_requests[0];
-            if (pr) {
+            try {
+              const workflowRun = context.payload.workflow_run;
+              const prs = workflowRun.pull_requests;
+              
+              if (!prs || prs.length === 0) {
+                console.log('No PRs found');
+                return;
+              }
+
+              const pr = prs[0];
+              console.log(`Processing PR #${pr.number}`);
+
               await github.rest.issues.addLabels({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: pr.number,
                 labels: ['test-passed']
               });
-            } else {
-              console.log('PR not found in workflow_run context.');
+              
+              console.log('Label added successfully');
+            } catch (error) {
+              console.error('Error:', error);
+              core.setFailed('Failed to add label');
             }
