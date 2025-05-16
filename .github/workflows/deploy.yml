@@ -28,6 +28,15 @@ jobs:
       
       - name: Deploy
         run: |
+          sed -i '/^version:/d' ./docker-compose.yml
+          
+          cat ./docker-compose.yml
+          
+          IMAGE_NAME="${{ secrets.DOCKERHUB_USERNAME }}/devops1:${{ steps.version.outputs.VERSION }}"
+          echo "Using image: $IMAGE_NAME"
+          
+          sed -i "s|image: .*|image: $IMAGE_NAME|g" ./docker-compose.yml
+          
           docker compose -f ./docker-compose.yml down
           docker compose -f ./docker-compose.yml pull
           docker compose -f ./docker-compose.yml up -d
