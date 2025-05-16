@@ -9,12 +9,17 @@ jobs:
   deploy:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: write 
+      pull-requests: write
+      issues: write
 
     steps:
       - name: Checkout master branch
         uses: actions/checkout@v4
         with:
           ref: master
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Get version
         id: version
@@ -26,29 +31,36 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       
-      - name: Deploy
+      - name: Prepare Docker deployment
         run: |
+          # Удаляем устаревший атрибут version
           sed -i '/^version:/d' ./docker-compose.yml
           
-          cat ./docker-compose.yml
-          
+          # Устанавливаем правильное имя образа
           IMAGE_NAME="${{ secrets.DOCKERHUB_USERNAME }}/devops1:${{ steps.version.outputs.VERSION }}"
-          echo "Using image: $IMAGE_NAME"
+          sed -i "s|image: .*|image: ${IMAGE_NAME}|g" ./docker-compose.yml
           
-          sed -i "s|image: .*|image: $IMAGE_NAME|g" ./docker-compose.yml
-          
+          # Проверяем изменения
+          cat ./docker-compose.yml
+
+      - name: Deploy containers
+        run: |
           docker compose -f ./docker-compose.yml down
           docker compose -f ./docker-compose.yml pull
           docker compose -f ./docker-compose.yml up -d
 
-      - name: Create Release
+      - name: Create GitHub Release
         uses: actions/create-release@v1
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  
         with:
           tag_name: v${{ steps.version.outputs.VERSION }}
           release_name: Release v${{ steps.version.outputs.VERSION }}
-          body: "Production deployment completed"
+          body: |
+            Production deployment completed
+            Docker image: ${{ secrets.DOCKERHUB_USERNAME }}/devops1:${{ steps.version.outputs.VERSION }}
+          draft: false
+          prerelease: false
 
       - name: Extract PR metadata
         id: pr-meta
@@ -58,41 +70,35 @@ jobs:
           result-encoding: json
           script: |
             const runId = context.payload.workflow_run.id;
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-
-            const { data: run } = await github.rest.actions.getWorkflowRun({
-              owner,
-              repo,
+            const response = await github.rest.actions.getWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
               run_id: runId
             });
-
-            const commitSha = run.head_sha;
-
-            const { data: prs } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
-              owner,
-              repo,
-              commit_sha: commitSha
+            
+            const prs = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: response.data.head_sha
             });
-
-            if (prs.length === 0) {
+            
+            if (prs.data.length === 0) {
               core.setOutput('skip', 'true');
-              return;
+              return { number: 0 };
             }
-
-            const pr = prs[0];
-            core.setOutput('pr_number', pr.number);
+            
+            core.setOutput('skip', 'false');
+            return { number: prs.data[0].number };
 
       - name: Add PROD label
-        if: steps.pr-meta.outputs.skip != 'true'
+        if: ${{ steps.pr-meta.outputs.skip == 'false' }}
         uses: actions/github-script@v6
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const prNumber = Number("${{ steps.pr-meta.outputs.pr_number }}");
             await github.rest.issues.addLabels({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: prNumber,
+              issue_number: ${{ steps.pr-meta.outputs.number }},
               labels: ['PROD']
             });
