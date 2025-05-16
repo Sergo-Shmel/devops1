@@ -1,0 +1,54 @@
+name: "2. Test Checks"
+
+on: 
+  workflow_run:
+    workflows: ["1. Security Checks"]
+    types: [completed]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+
+    steps:
+      - name: Run tests
+        run: |
+          echo "Running test 1"
+          ls -l
+          echo "Running test 2"
+          sleep 1
+          echo "All tests passed"
+
+      - name: Add 'test-passed' label
+        if: ${{ github.event.workflow_run.conclusion == 'success' }}
+        uses: actions/github-script@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT_FOR_WORKFLOWS }}
+        with:
+          script: |
+            try {
+              const workflowRun = context.payload.workflow_run;
+              const prs = workflowRun.pull_requests;
+              
+              if (!prs || prs.length === 0) {
+                console.log('No PRs found');
+                return;
+              }
+
+              const pr = prs[0];
+              console.log(`Processing PR #${pr.number}`);
+
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                labels: ['test-passed']
+              });
+              
+              console.log('Label added successfully');
+            } catch (error) {
+              console.error('Error:', error);
+              core.setFailed('Failed to add label');
+            }

@@ -1,0 +1,37 @@
+name: "1. Security Checks"
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for Docker files
+        id: docker_check
+        run: |
+          echo "dockerfile-exists=$(test -f Dockerfile && echo true || echo false)" >> $GITHUB_OUTPUT
+          echo "compose-exists=$(test -f docker-compose.yml && echo true || echo false)" >> $GITHUB_OUTPUT
+
+      - name: Scan Docker for vulnerabilities
+        if: steps.docker_check.outputs.dockerfile-exists == 'true'
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+
+      - name: Add security label
+        if: success()
+        uses: actions-ecosystem/action-add-labels@v1
+        with:
+          labels: 'security-passed'
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          repo: ${{ github.repository }}
+          number: ${{ github.event.pull_request.number }}
